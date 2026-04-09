@@ -1,0 +1,23 @@
+Suggested first real batch plan
+
+1. Do NOT scan to 50 GeV with the current meson-only generator.
+   Above m(J/psi)/2 ≈ 1.548 GeV there is no kinematically allowed meson contribution left.
+   A 50 GeV scan only makes sense once direct production / DY is actually implemented.
+
+2. Use one output ROOT file per mass point.
+   The executable writes with ROOT UPDATE mode, so multiple independent processes should not
+   write to the same file concurrently.
+
+3. Use adaptive threading:
+   - m < 0.10 GeV   -> 2 threads
+   - 0.10 to 0.40   -> 4 threads
+   - m >= 0.40      -> 12 threads
+
+4. First production target:
+   - 300 accepted events per mass point
+   - 30 minute wall limit per mass point
+
+5. Run inside one interactive CPU node first:
+   salloc -A dune -q interactive -C cpu -t 00:40:00
+
+6. Merge outputs afterward with hadd.
