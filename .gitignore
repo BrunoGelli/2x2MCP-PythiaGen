@@ -1,0 +1,20 @@
+# Build directories
+build/
+CMakeFiles/
+
+# CMake generated files
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Binaries
+allInOne_multimeson
+
+# Outputs
+*.root
+
+# Editor / misc
+*~
+*.swp
+.DS_Store
