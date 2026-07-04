@@ -44,8 +44,19 @@ set_target_properties(Pythia8::Pythia8 PROPERTIES
 
 # Main executable
 add_executable(allInOne_multimeson allInOne_multimeson.cc)
+add_executable(allInOne_emitter allInOne_multimeson.cc)
 
 target_link_libraries(allInOne_multimeson
+    PRIVATE
+        ROOT::Core
+        ROOT::RIO
+        ROOT::Tree
+        ROOT::Physics
+        Threads::Threads
+        Pythia8::Pythia8
+)
+
+target_link_libraries(allInOne_emitter
     PRIVATE
         ROOT::Core
         ROOT::RIO
@@ -58,6 +69,7 @@ target_link_libraries(allInOne_multimeson
 # Optional: make config files available from the build directory too
 configure_file(beam.config beam.config COPYONLY)
 configure_file(momentum.config momentum.config COPYONLY)
+file(COPY configs DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 message(STATUS "Using PYTHIA8 include dir: ${PYTHIA8_INCLUDE_DIR}")
 message(STATUS "Using PYTHIA8 library    : ${PYTHIA8_LIBRARY}")
