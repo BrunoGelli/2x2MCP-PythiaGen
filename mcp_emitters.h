@@ -55,7 +55,7 @@ inline const EmitterConfig* findEmitter(const std::string& name) {
 }
 
 inline bool isKinematicallyOpen(const EmitterConfig& e, double mchi) { return e.mass_GeV > 2.0 * mchi; }
-inline double phaseSpacePseudoscalar(double mchi, double m) { if (!isfinite(m) || m <= 0 || 2*mchi >= m) return 0.0; return std::pow(std::max(0.0, 1.0 - 4*mchi*mchi/(m*m)), 3); }
-inline double phaseSpaceVector(double mchi, double m) { if (!isfinite(m) || m <= 0 || 2*mchi >= m) return 0.0; return std::sqrt(std::max(0.0, 1.0 - 4*mchi*mchi/(m*m))); }
+inline double phaseSpacePseudoscalar(double mchi, double m) { if (!std::isfinite(m) || m <= 0 || 2*mchi >= m) return 0.0; return std::pow(std::max(0.0, 1.0 - 4*mchi*mchi/(m*m)), 3); }
+inline double phaseSpaceVector(double mchi, double m) { if (!std::isfinite(m) || m <= 0 || 2*mchi >= m) return 0.0; return std::sqrt(std::max(0.0, 1.0 - 4*mchi*mchi/(m*m))); }
 
 #endif
