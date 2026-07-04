@@ -60,7 +60,36 @@ Useful options:
 - `--spectra-prescale N`
 - `--beam-config beam.config`
 - `--momentum-config momentum.config`
+- `--production-config configs/charmonium.config`
+- `--print-pythia-settings`
 - `--quiet` / `--batch`
+### Production config diagnostics
+
+`production_mode=charmonium` explicitly disables SoftQCD/minimum-bias switches after reading the common beam setup and before enabling the charmonium card.  The default editable card is:
+
+```text
+configs/charmonium.config
+```
+
+The default charmonium settings used by that card are:
+
+```text
+HardQCD:hardccbar = on
+Charmonium:all = on
+```
+
+You can test alternate charmonium steering without recompiling:
+
+```bash
+./allInOne_multimeson 1000 1 10000 1.00 2x2 jpsi charmonium outputs/test_jpsi_1gev.root \
+  --mode fixed-events --n-events 10000 --write-spectra accepted \
+  --production-config configs/charmonium.config --print-pythia-settings
+```
+
+`--print-pythia-settings` prints Pythia's changed settings before `init()`, which is useful for verifying that `SoftQCD:all = off` in charmonium mode.
+
+The `n_pythia_next_failures` counter is incremented whenever `pythia.next()` returns `false`.  Pythia warning messages that do not cause a false return are not included in this counter.
+
 
 Intentional breaking change: the old `parentList=all` multi-emitter CLI is replaced by a single `emitterName productionMode` per job.  The executable name `allInOne_multimeson` is retained for backwards build compatibility; CMake also provides an `allInOne_emitter` alias target.
 
@@ -81,6 +110,19 @@ Backward-compatible aliases such as `mcp_mass`, `parent_pdg`, `parent_type`, `pa
 ### `mcp_spectra`
 
 One row per retained MCP according to `--write-spectra` and `--spectra-prescale`, including event metadata, MCP/mother identity, lab four-vectors, angular variables, detector projection, mother four-vector, and feed-down diagnostics.
+
+Quick ROOT diagnostic command:
+
+```bash
+root -l -b -q -e '
+TFile f("outputs/test_jpsi_1gev.root");
+auto s = (TTree*)f.Get("mcp_summary");
+auto k = (TTree*)f.Get("mcp_spectra");
+s->Scan("mcp_mass_GeV:emitter_name:production_mode_name:is_kinematically_open:n_events_generated:n_emitter_total:n_mcp_total:n_mcp_accepted:n_mcp_wrong_mother:n_mcp_no_mother:n_pythia_next_failures:stop_reason:stopping_mode_name", "", "colsize=18", 20);
+std::cout << "spectra entries = " << (k ? k->GetEntries() : -1) << std::endl;
+'
+```
+
 
 ## NERSC-style workflow
 
@@ -135,7 +177,14 @@ Suggested smoke tests:
 2. `pi0`, `mchi=0.10 GeV`: expect closed and skipped.
 3. `phi`, `mchi=0.45 GeV`: expect open, likely low statistics.
 4. `phi`, `mchi=0.60 GeV`: expect closed.
-5. `jpsi`, `mchi=1.0 GeV`: expect open if local charmonium production is configured correctly.
+5. `jpsi`, `mchi=1.0 GeV`: expect open if local charmonium production is configured correctly.  Smoke-test command:
+
+   ```bash
+   ./allInOne_multimeson 1000 1 10000 1.00 2x2 jpsi charmonium outputs/test_jpsi_1gev.root \
+     --mode fixed-events --n-events 10000 --write-spectra accepted --quiet
+   ```
+
+   Expected: `is_kinematically_open = 1`, `n_events_generated = 10000`, clearly nonzero `n_emitter_total`, `n_mcp_total = 2 * n_emitter_total` unless Pythia event-record status semantics require further documented filtering, and no `should not combine softQCD processes with hard ones` warning.
 6. In a `pi0` run, `n_mcp_wrong_mother` should be zero; MCP mothers should be PDG 111, including feed-down pi0s.
 
 ## Caveats

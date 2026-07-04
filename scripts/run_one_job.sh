@@ -14,4 +14,6 @@ IFS='|' read -r seed nevents mass geom emitter mode outfile jid <<< "$row"
 mkdir -p "$(dirname "$outfile")" logs/jobs
 if [[ -s "$outfile" && "$OVERWRITE" != 1 ]]; then echo "Output exists, skipping: $outfile"; exit 0; fi
 log="logs/jobs/job_${jid}.log"
-"$EXEC" "$seed" "$NTHREADS" "$nevents" "$mass" "$geom" "$emitter" "$mode" "$outfile" --mode fixed-events --n-events "$nevents" --write-spectra "${WRITE_SPECTRA:-accepted}" --spectra-prescale "${SPECTRA_PRESCALE:-1}" --batch >"$log" 2>&1
+cmd=("$EXEC" "$seed" "$NTHREADS" "$nevents" "$mass" "$geom" "$emitter" "$mode" "$outfile" --mode fixed-events --n-events "$nevents" --write-spectra "${WRITE_SPECTRA:-accepted}" --spectra-prescale "${SPECTRA_PRESCALE:-1}" --batch)
+if [[ -n "${PRODUCTION_CONFIG:-}" ]]; then cmd+=(--production-config "$PRODUCTION_CONFIG"); fi
+"${cmd[@]}" >"$log" 2>&1

@@ -69,6 +69,7 @@ target_link_libraries(allInOne_emitter
 # Optional: make config files available from the build directory too
 configure_file(beam.config beam.config COPYONLY)
 configure_file(momentum.config momentum.config COPYONLY)
+file(COPY configs DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 message(STATUS "Using PYTHIA8 include dir: ${PYTHIA8_INCLUDE_DIR}")
 message(STATUS "Using PYTHIA8 library    : ${PYTHIA8_LIBRARY}")
