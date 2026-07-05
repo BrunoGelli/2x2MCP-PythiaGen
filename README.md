@@ -237,3 +237,98 @@ Suggested smoke tests:
 - Epsilon scaling, physical branching ratios, and detector response are applied later.
 - Charmonium production is isolated for bookkeeping; validate its Pythia tune before absolute interpretation.
 - DY is reserved but not generated in this revision.
+
+## Normalization to POT
+
+The normalized plotting and toy-MC export tools use placeholder exotic branching weights that are intended for pipeline studies, not final sensitivity claims.  The default constants are central model inputs and should be replaced or validated before publication-quality results.
+
+For a parent/emitter and MCP mass, the accepted MCP yield is computed as
+
+```text
+N_acc(parent, mchi, epsilon)
+= N_POT
+  × process_scale(parent)
+  × (n_mcp_accepted / n_events_generated)
+  × Br_exotic(parent, mchi, epsilon)
+```
+
+`n_mcp_accepted` already counts MCP particles, so the normalization does **not** multiply by two again.
+
+For `light_mesons` mode, the SoftQCD/minimum-bias-style sample is treated as generic proton interactions under the same convention used in the earlier acceptance plots:
+
+```text
+process_scale(light_mesons) = 1
+```
+
+For `charmonium` mode, the sample is a biased hard/charmonium sample.  Its raw event count cannot be added directly to light-meson event counts.  The plotting/export tools compute
+
+```text
+process_scale(charmonium) = sigma_charmonium_mb_mean / sigma_softqcd_mb_mean
+```
+
+where `sigma_*_mb_mean` is the mean generated cross section per input file, not `sigma_gen_mb_sum` directly.  The aggregator stores both `sigma_gen_mb_sum` and `sigma_gen_mb_mean` because the sum grows with the number of shards.  Absolute charmonium normalization still needs validation against the target Pythia tune or an external production model.
+
+The placeholder exotic weights are:
+
+```text
+pseudoscalar: Br_exotic = epsilon^2 * alpha * reference_br * (1 - 4*mchi^2/mParent^2)^3
+vector:       Br_exotic = epsilon^2 * alpha * reference_br * beta * (1 + 2*mchi^2/mParent^2)
+beta = sqrt(1 - 4*mchi^2/mParent^2)
+```
+
+Run the normalized-yield macro with:
+
+```cpp
+.x plot_normalized_mcp_yield.C
+plot_normalized_mcp_yield("outputs/aggregate_summary_4h.root", 1.5e19, 1e-2);
+```
+
+It produces acceptance vs mass, accepted MCP yield per emitter, and total accepted MCP yield summed over emitters, with labels noting `N_POT`, `epsilon`, and placeholder branching normalization.
+
+## Spectra and angular plots
+
+Use the spectra plotting helper on raw ROOT files containing `mcp_spectra`:
+
+```bash
+scripts/plot_spectra.py \
+  --spectra-dir outputs/raw_4h \
+  --output-dir plots/spectra_4h \
+  --accepted-only
+```
+
+The script makes `theta_x_rad` vs `theta_y_rad`, theta, `pz_GeV` vs theta, energy, detector-plane x/y, and accepted-only x/y hit-map plots.  The detector-plane plot draws the 2x2 boxes:
+
+```text
+left:  x in [-0.65, -0.05], y in [-0.7, 0.7]
+right: x in [ 0.05,  0.65], y in [-0.7, 0.7]
+```
+
+Production runs with `WRITE_SPECTRA=accepted` are immediately useful for hit maps.  Full angular distributions require spectra-focused runs such as `--write-spectra all --spectra-prescale N`.
+
+## Toy MC spectra export
+
+Export weighted MCP rows for toy detector MC with:
+
+```bash
+scripts/export_toymc_spectra.py \
+  --summary outputs/aggregate_summary_4h.csv \
+  --spectra-dir outputs/raw_4h \
+  --pot 1.5e19 \
+  --epsilon 1e-2 \
+  --output-csv outputs/toymc_mcp_spectra_eps1e-2.csv \
+  --accepted-only
+```
+
+The output CSV includes kinematics, detector projection, `process_scale`, `br_exotic`, `spectra_prescale`, and weights.  For each retained MCP spectrum row,
+
+```text
+event_weight = N_POT
+             × process_scale
+             × Br_exotic(parent, mchi, epsilon)
+             × spectra_prescale
+             / n_events_generated_for_that_mass_emitter_mode
+```
+
+`weight_per_POT = event_weight / N_POT`.
+
+For accepted-only spectra with `spectra_prescale = 1`, summing `event_weight` over rows with `passed_geometry = 1` should reproduce the normalized accepted-yield plot for that mass/emitter/mode.  For all-produced spectra with `spectra_prescale > 1`, the prescale factor accounts for downsampling.  The export script validates this grouping by `(mcp_mass_GeV, emitter_pdg, production_mode, geometry_id)` and prints differences or warnings.  The production mode is always part of the key so light-meson and charmonium normalizations are not mixed.
