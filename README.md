@@ -118,29 +118,17 @@ Consequences:
 
 The normalized plotting layer treats charmonium as an importance-sampled component. The scale factor used to convert a charmonium-biased event sample into the light-meson/minimum-bias convention is
 
-$$
-S_{J/\psi}
-=
-\frac{\langle \sigma_{\rm charmonium} \rangle}{\langle \sigma_{\rm SoftQCD} \rangle}.
-$$
+$$ S_{J/\psi} = \frac{\langle \sigma_{\rm charmonium} \rangle}{\langle \sigma_{\rm SoftQCD} \rangle}. $$
 
 Here the angle brackets mean the **mean generated cross section per input file/shard**, not the sum over files. This distinction is important: `sigma_gen_mb_sum` grows if you run more shards, while the physical process cross section should not.
 
 For an aggregate containing equivalent shards,
 
-$$
-\langle \sigma_{\rm mode} \rangle
-=
-\frac{\sum_i \sigma_{{\rm gen},i}}{N_{\rm input\ files}}.
-$$
+$$ \langle \sigma_{\rm mode} \rangle = \frac{\sum_i \sigma_{{\rm gen},i}}{N_{\rm input\ files}}. $$
 
 Then the default process scales are
 
-$$
-S_{\rm light\ mesons}=1,
-\qquad
-S_{\rm charmonium}=\frac{\langle \sigma_{\rm charmonium}\rangle}{\langle \sigma_{\rm SoftQCD}\rangle}.
-$$
+$$ S_{\rm light\ mesons}=1, \qquad S_{\rm charmonium}=\frac{\langle \sigma_{\rm charmonium}\rangle}{\langle \sigma_{\rm SoftQCD}\rangle}. $$
 
 A useful sanity check is that doubling the number of equivalent shards should roughly double `n_events_generated`, `n_mcp_total`, and `n_mcp_accepted`, but it should **not** double the mean cross section used for normalization.
 
@@ -303,19 +291,11 @@ There are three different kinds of normalization ingredients:
 2. **Phase-space factors**: analytic/model approximations for the MCP-mass dependence. These are not arbitrary, but the current formulas are approximations that may later be replaced by a more exact integral.
 3. **Production cross sections**: generator/model dependent. This matters especially for charmonium, which is generated with a biased hard/charmonium process card.
 
+The phase-space factors are **model choices, but not arbitrary floating knobs**. They encode the expected threshold behavior of the rare MCP decay as the MCP mass approaches half the parent mass. The current defaults reproduce the same simplified mass dependence used in the earlier plotting macro: pseudoscalar three-body decays are suppressed by a cubic factor, while vector two-body decays use the usual fermion-pair threshold factor. They should be treated as the current analytic approximation, not as fitted parameters. A later version can replace the pseudoscalar approximation with a more exact phase-space integral without changing the generator output.
+
 For a parent/emitter and MCP mass, the accepted MCP yield is computed as
 
-$$
-N_{\rm acc}(P,m_\chi,\varepsilon)
-=
-N_{\rm POT}
-\times
-S_P
-\times
-\frac{N_{\chi,{\rm accepted}}}{N_{\rm events}}
-\times
-{\rm Br}_{\rm exotic}(P,m_\chi,\varepsilon).
-$$
+$$ N_{\rm acc}(P,m_\chi,\varepsilon) = N_{\rm POT} \times S_P \times \frac{N_{\chi,{\rm accepted}}}{N_{\rm events}} \times {\rm Br}_{\rm exotic}(P,m_\chi,\varepsilon). $$
 
 Here:
 
@@ -328,74 +308,43 @@ Here:
 
 For `light_mesons` mode, the SoftQCD/minimum-bias-style sample is treated as generic proton interactions under the same convention used in the earlier acceptance plots:
 
-$$
-S_{\rm light\ mesons}=1.
-$$
+$$ S_{\rm light\ mesons}=1. $$
 
 For `charmonium` mode, the sample is a biased hard/charmonium sample. Its raw event count cannot be added directly to light-meson event counts. The plotting/export tools use
 
-$$
-S_{\rm charmonium}
-=
-\frac{\langle \sigma_{\rm charmonium} \rangle}
-       {\langle \sigma_{\rm SoftQCD} \rangle}.
-$$
+$$ S_{\rm charmonium} = \frac{\langle \sigma_{\rm charmonium} \rangle} {\langle \sigma_{\rm SoftQCD} \rangle}. $$
 
 The mean cross section is computed per input file/shard:
 
-$$
-\langle \sigma_{\rm mode} \rangle
-=
-\frac{\sigma_{\rm gen,mb,sum}}{N_{\rm input\ files}}.
-$$
+$$ \langle \sigma_{\rm mode} \rangle = \frac{\sigma_{\rm gen,mb,sum}}{N_{\rm input\ files}}. $$
 
 Do **not** use `sigma_gen_mb_sum` directly as a process cross section. It grows with the number of shards. The aggregator stores both sum and mean values so the normalization remains stable when more shards are added.
 
 ### Exotic branching weights
 
+The rare decay weights are applied only in post-processing. The generator uses forced branching ratio 1 for statistics; the physical MCP rate is restored here by multiplying by a model branching factor.
+
 Let
 
-$$
-r = \frac{m_\chi^2}{m_P^2}.
-$$
+$$ r = \frac{m_\chi^2}{m_P^2}. $$
 
 The current default pseudoscalar approximation for
 
-$$
-P \to \gamma\chi\bar{\chi}
-$$
+$$ P \to \gamma\chi\bar{\chi} $$
 
 is
 
-$$
-{\rm Br}_{\rm exotic}^{\rm pseudo}(P,m_\chi,\varepsilon)
-=
-\varepsilon^2\,\alpha\,{\rm Br}_{\rm ref}(P)
-\left(1-4r\right)^3,
-\qquad
-2m_\chi < m_P.
-$$
+$$ {\rm Br}_{\rm exotic}^{\rm pseudo}(P,m_\chi,\varepsilon) = \varepsilon^2\,\alpha\,{\rm Br}_{\rm ref}(P) \left(1-4r\right)^3, \qquad 2m_\chi < m_P. $$
 
 For closed channels, $2m_\chi \geq m_P$, the branching weight is set to zero.
 
 The current default vector approximation for
 
-$$
-V \to \gamma^* \to \chi\bar{\chi}
-$$
+$$ V \to \gamma^* \to \chi\bar{\chi} $$
 
 is
 
-$$
-{\rm Br}_{\rm exotic}^{\rm vector}(V,m_\chi,\varepsilon)
-=
-\varepsilon^2\,\alpha\,{\rm Br}_{\rm ref}(V)
-\,\beta\,(1+2r),
-\qquad
-\beta = \sqrt{1-4r},
-\qquad
-2m_\chi < m_V.
-$$
+$$ {\rm Br}_{\rm exotic}^{\rm vector}(V,m_\chi,\varepsilon) = \varepsilon^2\,\alpha\,{\rm Br}_{\rm ref}(V) \,\beta\,(1+2r), \qquad \beta = \sqrt{1-4r}, \qquad 2m_\chi < m_V. $$
 
 Again, closed channels receive zero weight.
 
@@ -462,31 +411,17 @@ scripts/export_toymc_spectra.py \
 
 The output CSV includes kinematics, detector projection, `process_scale`, `br_exotic`, `spectra_prescale`, and weights. For each retained MCP spectrum row,
 
-$$
-w_{\rm event}
-=
-N_{\rm POT}
-\times
-S_P
-\times
-{\rm Br}_{\rm exotic}(P,m_\chi,\varepsilon)
-\times
-\frac{f_{\rm prescale}}{N_{\rm events}(P,m_\chi,{\rm mode})}.
-$$
+$$ w_{\rm event} = N_{\rm POT} \times S_P \times {\rm Br}_{\rm exotic}(P,m_\chi,\varepsilon) \times \frac{f_{\rm prescale}}{N_{\rm events}(P,m_\chi,{\rm mode})}. $$
 
 The per-POT weight is
 
-$$
-w_{\rm per\ POT}=\frac{w_{\rm event}}{N_{\rm POT}}.
-$$
+$$ w_{\rm per\ POT}=\frac{w_{\rm event}}{N_{\rm POT}}. $$
 
 For accepted-only spectra with `spectra_prescale = 1`, summing `event_weight` over rows with `passed_geometry = 1` should reproduce the normalized accepted-yield plot for that mass/emitter/mode. For all-produced spectra with `spectra_prescale > 1`, the prescale factor accounts for downsampling.
 
 The export script validates this by grouping rows with
 
-$$
-(m_\chi,\;{\rm emitter\_pdg},\;{\rm production\_mode},\;{\rm geometry\_id}).
-$$
+$$ (m_\chi,\;{\rm emitter\_pdg},\;{\rm production\_mode},\;{\rm geometry\_id}). $$
 
 The production mode is always part of the key so light-meson and charmonium normalizations are not mixed.
 
