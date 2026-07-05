@@ -95,14 +95,54 @@ The `n_pythia_next_failures` counter is incremented whenever `pythia.next()` ret
 
 ## Why charmonium is normalized separately
 
-`light_mesons` mode is a SoftQCD/minimum-bias-style sample intended to estimate light neutral meson production per generic proton interaction.  `charmonium` mode is not the same kind of sample: it enables hard charm/charmonium production (`HardQCD:hardccbar` and `Charmonium:all`) and therefore biases generation toward charm/charmonium events.
+`light_mesons` mode and `charmonium` mode are intentionally **different production samples**.
+
+`light_mesons` mode is a SoftQCD/minimum-bias-style sample. In this repository's current convention, it is used to estimate light neutral meson production per generic proton interaction. This is the same convention used in the original pi0-only pipeline, where a meson yield per generated event was scaled by POT.
+
+`charmonium` mode is not a generic proton-interaction sample. It explicitly enables hard charm/charmonium production, for example the default card:
+
+```text
+HardQCD:hardccbar = on
+Charmonium:all = on
+```
+
+This biases generation toward charm/charmonium events so that the J/psi acceptance and spectra can be measured with useful statistics. That is good for efficiency, but it means raw event counts in `charmonium` mode cannot be added directly to raw event counts in `light_mesons` mode.
 
 Consequences:
 
 - `n_events_generated` in `charmonium` mode is not directly comparable to `n_events_generated` in `light_mesons` mode.
-- Do not add light-meson and charmonium yields by raw event counts.
-- Charmonium must be normalized using its generated/known cross section or an external production model.
-- The generator records `production_mode`, `sigma_gen_mb`, `sigma_err_mb`, and `weight_per_event_mb` to support later normalization, but the absolute charmonium normalization still needs validation in the target Pythia/tune setup.
+- Do not add light-meson and charmonium yields by raw generated-event counts.
+- Charmonium should be normalized using a generated/known production cross section or an external production model.
+- The generator records `production_mode`, `sigma_gen_mb`, `sigma_err_mb`, and `weight_per_event_mb` to support later normalization.
+- The absolute J/psi normalization is therefore **Pythia-card/tune dependent** and should be validated before using it as a publication-quality prediction.
+
+The normalized plotting layer treats charmonium as an importance-sampled component. The scale factor used to convert a charmonium-biased event sample into the light-meson/minimum-bias convention is
+
+$$
+S_{J/\psi}
+=
+\frac{\langle \sigma_{\rm charmonium} \rangle}{\langle \sigma_{\rm SoftQCD} \rangle}.
+$$
+
+Here the angle brackets mean the **mean generated cross section per input file/shard**, not the sum over files. This distinction is important: `sigma_gen_mb_sum` grows if you run more shards, while the physical process cross section should not.
+
+For an aggregate containing equivalent shards,
+
+$$
+\langle \sigma_{\rm mode} \rangle
+=
+\frac{\sum_i \sigma_{{\rm gen},i}}{N_{\rm input\ files}}.
+$$
+
+Then the default process scales are
+
+$$
+S_{\rm light\ mesons}=1,
+\qquad
+S_{\rm charmonium}=\frac{\langle \sigma_{\rm charmonium}\rangle}{\langle \sigma_{\rm SoftQCD}\rangle}.
+$$
+
+A useful sanity check is that doubling the number of equivalent shards should roughly double `n_events_generated`, `n_mcp_total`, and `n_mcp_accepted`, but it should **not** double the mean cross section used for normalization.
 
 Intentional breaking change: the old `parentList=all` multi-emitter CLI is replaced by a single `emitterName productionMode` per job.  The executable name `allInOne_multimeson` is retained for backwards build compatibility; CMake also provides an `allInOne_emitter` alias target.
 
@@ -154,6 +194,8 @@ Unique MCP-mother diagnostic using `(event_index,mother_index)` for a single-thr
 
 ```bash
 root -l -b -q -e '
+#include <set>
+#include <utility>
 TFile f("outputs/test_jpsi_1gev.root");
 auto k = (TTree*)f.Get("mcp_spectra");
 std::set<std::pair<int,int>> mothers;
@@ -199,19 +241,32 @@ The aggregator groups by `mcp_mass_GeV`, `emitter_pdg`, `production_mode`, and `
 
 ## Plotting
 
-The plotting macro consumes raw ROOT files containing `mcp_summary` (or ROOT aggregates with the same tree name):
+The plotting macros consume either raw ROOT files containing `mcp_summary` or aggregate ROOT files with the same tree name.
+
+Legacy/proxy plotting:
 
 ```cpp
 .x plot_acceptance_vs_mass_multimeson.C
 plot_acceptance_vs_mass_multimeson("outputs/raw/emitter_pi0/mass_0p010000/job_000000.root", 1.5e19, 1e-2);
 ```
 
-It plots acceptance vs mass and an accepted flux proxy.  Placeholder weights are applied only at plotting time:
+The legacy plot is useful for quick debugging, but it should be interpreted as a **proxy** unless the normalization choices below are applied.
 
-- pseudoscalars: `(1 - 4*mchi^2/mM^2)^3`
-- vectors: `sqrt(1 - 4*mchi^2/mV^2)`
+Normalized plotting:
 
-Absolute normalizations are intentionally editable placeholders, not PDG-perfect results.
+```cpp
+.x plot_normalized_mcp_yield.C
+plot_normalized_mcp_yield("outputs/aggregate_summary_4h.root", 1.5e19, 1e-2);
+```
+
+This produces:
+
+1. acceptance vs MCP mass per emitter;
+2. accepted MCP yield vs MCP mass per emitter;
+3. total accepted MCP yield vs MCP mass, summed over emitters;
+4. labels showing the chosen `N_POT`, epsilon, and the fact that the branching constants are configurable model inputs.
+
+The normalized-yield plot should be read as a pipeline-level physics prediction using the current reference constants and phase-space approximations. It is not yet a final sensitivity result until the branching constants, production model, detector response, and background treatment are validated.
 
 ## Validation checklist
 
@@ -228,7 +283,7 @@ Suggested smoke tests:
      --mode fixed-events --n-events 10000 --write-spectra all --spectra-prescale 1 --diagnostics --quiet
    ```
 
-   Expected: `is_kinematically_open = 1`, `n_events_generated = 10000`, clearly nonzero `n_emitter_total`, `n_mcp_total = 2 * n_emitter_total` unless Pythia event-record status semantics require further documented filtering, and no `should not combine softQCD processes with hard ones` warning.
+   Expected: `is_kinematically_open = 1`, `n_events_generated = 10000`, clearly nonzero `n_emitter_decayed_to_mcp`, `n_mcp_total = 2 * n_emitter_decayed_to_mcp`, `n_mcp_pairing_anomalies = 0`, and no `should not combine softQCD processes with hard ones` warning. `n_emitter_record_entries` may be larger than `n_emitter_decayed_to_mcp` because of Pythia event-record/status copies.
 6. In a `pi0` run, `n_mcp_wrong_mother` should be zero; MCP mothers should be PDG 111, including feed-down pi0s.
 
 ## Caveats
@@ -240,41 +295,127 @@ Suggested smoke tests:
 
 ## Normalization to POT
 
-The normalized plotting and toy-MC export tools use placeholder exotic branching weights that are intended for pipeline studies, not final sensitivity claims.  The default constants are central model inputs and should be replaced or validated before publication-quality results.
+The normalized plotting and toy-MC export tools use explicit exotic branching weights. The default numbers are **model inputs**, not fit parameters. They are intended to make the pipeline reproducible and easy to update as the physics model is refined.
+
+There are three different kinds of normalization ingredients:
+
+1. **Reference branching ratios**: fixed lookup values, normally taken from PDG or another documented source. These are not intended to float in the analysis, but they should be easy to update.
+2. **Phase-space factors**: analytic/model approximations for the MCP-mass dependence. These are not arbitrary, but the current formulas are approximations that may later be replaced by a more exact integral.
+3. **Production cross sections**: generator/model dependent. This matters especially for charmonium, which is generated with a biased hard/charmonium process card.
 
 For a parent/emitter and MCP mass, the accepted MCP yield is computed as
 
-```text
-N_acc(parent, mchi, epsilon)
-= N_POT
-  × process_scale(parent)
-  × (n_mcp_accepted / n_events_generated)
-  × Br_exotic(parent, mchi, epsilon)
-```
+$$
+N_{\rm acc}(P,m_\chi,\varepsilon)
+=
+N_{\rm POT}
+\times
+S_P
+\times
+\frac{N_{\chi,{\rm accepted}}}{N_{\rm events}}
+\times
+{\rm Br}_{\rm exotic}(P,m_\chi,\varepsilon).
+$$
 
-`n_mcp_accepted` already counts MCP particles, so the normalization does **not** multiply by two again.
+Here:
+
+- $P$ is the selected emitter species;
+- $S_P$ is the production-mode scale factor;
+- $N_{\chi,{\rm accepted}}$ is `n_mcp_accepted`;
+- $N_{\rm events}$ is `n_events_generated`.
+
+`n_mcp_accepted` already counts MCP particles. Therefore this formula does **not** multiply by two again.
 
 For `light_mesons` mode, the SoftQCD/minimum-bias-style sample is treated as generic proton interactions under the same convention used in the earlier acceptance plots:
 
-```text
-process_scale(light_mesons) = 1
-```
+$$
+S_{\rm light\ mesons}=1.
+$$
 
-For `charmonium` mode, the sample is a biased hard/charmonium sample.  Its raw event count cannot be added directly to light-meson event counts.  The plotting/export tools compute
+For `charmonium` mode, the sample is a biased hard/charmonium sample. Its raw event count cannot be added directly to light-meson event counts. The plotting/export tools use
 
-```text
-process_scale(charmonium) = sigma_charmonium_mb_mean / sigma_softqcd_mb_mean
-```
+$$
+S_{\rm charmonium}
+=
+\frac{\langle \sigma_{\rm charmonium} \rangle}
+       {\langle \sigma_{\rm SoftQCD} \rangle}.
+$$
 
-where `sigma_*_mb_mean` is the mean generated cross section per input file, not `sigma_gen_mb_sum` directly.  The aggregator stores both `sigma_gen_mb_sum` and `sigma_gen_mb_mean` because the sum grows with the number of shards.  Absolute charmonium normalization still needs validation against the target Pythia tune or an external production model.
+The mean cross section is computed per input file/shard:
 
-The placeholder exotic weights are:
+$$
+\langle \sigma_{\rm mode} \rangle
+=
+\frac{\sigma_{\rm gen,mb,sum}}{N_{\rm input\ files}}.
+$$
 
-```text
-pseudoscalar: Br_exotic = epsilon^2 * alpha * reference_br * (1 - 4*mchi^2/mParent^2)^3
-vector:       Br_exotic = epsilon^2 * alpha * reference_br * beta * (1 + 2*mchi^2/mParent^2)
-beta = sqrt(1 - 4*mchi^2/mParent^2)
-```
+Do **not** use `sigma_gen_mb_sum` directly as a process cross section. It grows with the number of shards. The aggregator stores both sum and mean values so the normalization remains stable when more shards are added.
+
+### Exotic branching weights
+
+Let
+
+$$
+r = \frac{m_\chi^2}{m_P^2}.
+$$
+
+The current default pseudoscalar approximation for
+
+$$
+P \to \gamma\chi\bar{\chi}
+$$
+
+is
+
+$$
+{\rm Br}_{\rm exotic}^{\rm pseudo}(P,m_\chi,\varepsilon)
+=
+\varepsilon^2\,\alpha\,{\rm Br}_{\rm ref}(P)
+\left(1-4r\right)^3,
+\qquad
+2m_\chi < m_P.
+$$
+
+For closed channels, $2m_\chi \geq m_P$, the branching weight is set to zero.
+
+The current default vector approximation for
+
+$$
+V \to \gamma^* \to \chi\bar{\chi}
+$$
+
+is
+
+$$
+{\rm Br}_{\rm exotic}^{\rm vector}(V,m_\chi,\varepsilon)
+=
+\varepsilon^2\,\alpha\,{\rm Br}_{\rm ref}(V)
+\,\beta\,(1+2r),
+\qquad
+\beta = \sqrt{1-4r},
+\qquad
+2m_\chi < m_V.
+$$
+
+Again, closed channels receive zero weight.
+
+The older pseudoscalar integral approximation can be kept as an optional future switch, but the default power-law form above preserves continuity with the existing pipeline.
+
+### Default reference constants
+
+The defaults below are the constants used by the current plotting code. They should be documented in code comments and validated against the desired PDG release before final results.
+
+| Emitter | PDG | Type | Mass [GeV] | Reference branching normalization |
+|---|---:|---|---:|---:|
+| $\pi^0$ | 111 | pseudoscalar | 0.1349770 | ${\rm Br}(\pi^0\to\gamma\gamma)=0.98823$ |
+| $\eta$ | 221 | pseudoscalar | 0.5478620 | ${\rm Br}(\eta\to\gamma\gamma)=0.39410$ |
+| $\eta'$ | 331 | pseudoscalar | 0.9577800 | ${\rm Br}(\eta'\to\gamma\gamma)=0.02220$ |
+| $\rho^0$ | 113 | vector | 0.7752600 | ${\rm Br}(\rho^0\to e^+e^-)=4.72\times 10^{-5}$ |
+| $\omega$ | 223 | vector | 0.7826500 | ${\rm Br}(\omega\to e^+e^-)=7.36\times 10^{-5}$ |
+| $\phi$ | 333 | vector | 1.0194610 | ${\rm Br}(\phi\to e^+e^-)=2.973\times 10^{-4}$ |
+| $J/\psi$ | 443 | vector | 3.0969000 | ${\rm Br}(J/\psi\to e^+e^-)=5.971\times 10^{-2}$ |
+
+The pseudoscalar constants use the two-photon branching fraction as the reference electromagnetic normalization. The vector constants use the dielectron branching fraction as the reference electromagnetic normalization. This is a compact phenomenological model choice; the code should keep these constants centralized so a more exact model can replace them later.
 
 Run the normalized-yield macro with:
 
@@ -283,7 +424,7 @@ Run the normalized-yield macro with:
 plot_normalized_mcp_yield("outputs/aggregate_summary_4h.root", 1.5e19, 1e-2);
 ```
 
-It produces acceptance vs mass, accepted MCP yield per emitter, and total accepted MCP yield summed over emitters, with labels noting `N_POT`, `epsilon`, and placeholder branching normalization.
+It produces acceptance vs mass, accepted MCP yield per emitter, and total accepted MCP yield summed over emitters, with labels noting $N_{\rm POT}$, $\varepsilon$, and the placeholder branching normalization.
 
 ## Spectra and angular plots
 
@@ -319,16 +460,43 @@ scripts/export_toymc_spectra.py \
   --accepted-only
 ```
 
-The output CSV includes kinematics, detector projection, `process_scale`, `br_exotic`, `spectra_prescale`, and weights.  For each retained MCP spectrum row,
+The output CSV includes kinematics, detector projection, `process_scale`, `br_exotic`, `spectra_prescale`, and weights. For each retained MCP spectrum row,
 
-```text
-event_weight = N_POT
-             × process_scale
-             × Br_exotic(parent, mchi, epsilon)
-             × spectra_prescale
-             / n_events_generated_for_that_mass_emitter_mode
-```
+$$
+w_{\rm event}
+=
+N_{\rm POT}
+\times
+S_P
+\times
+{\rm Br}_{\rm exotic}(P,m_\chi,\varepsilon)
+\times
+\frac{f_{\rm prescale}}{N_{\rm events}(P,m_\chi,{\rm mode})}.
+$$
 
-`weight_per_POT = event_weight / N_POT`.
+The per-POT weight is
 
-For accepted-only spectra with `spectra_prescale = 1`, summing `event_weight` over rows with `passed_geometry = 1` should reproduce the normalized accepted-yield plot for that mass/emitter/mode.  For all-produced spectra with `spectra_prescale > 1`, the prescale factor accounts for downsampling.  The export script validates this grouping by `(mcp_mass_GeV, emitter_pdg, production_mode, geometry_id)` and prints differences or warnings.  The production mode is always part of the key so light-meson and charmonium normalizations are not mixed.
+$$
+w_{\rm per\ POT}=\frac{w_{\rm event}}{N_{\rm POT}}.
+$$
+
+For accepted-only spectra with `spectra_prescale = 1`, summing `event_weight` over rows with `passed_geometry = 1` should reproduce the normalized accepted-yield plot for that mass/emitter/mode. For all-produced spectra with `spectra_prescale > 1`, the prescale factor accounts for downsampling.
+
+The export script validates this by grouping rows with
+
+$$
+(m_\chi,\;{\rm emitter\_pdg},\;{\rm production\_mode},\;{\rm geometry\_id}).
+$$
+
+The production mode is always part of the key so light-meson and charmonium normalizations are not mixed.
+
+## Current caveats and interpretation notes
+
+- MCP branching ratios are forced to 1 in generation for statistics. Physical branching weights are applied only in post-processing.
+- Epsilon scaling, physical branching ratios, detector response, and background treatment are not handled by the generator.
+- The default branching constants are documented reference inputs, not fit parameters, but they still need validation against the desired PDG release/model choice.
+- The phase-space functions are analytic approximations. They are useful for a consistent pipeline but may be replaced by a more exact model.
+- The J/psi/charmonium component is generated with a biased hard/charmonium sample and must be normalized using cross sections or an external production model. Do not compare raw `n_events_generated` between `charmonium` and `light_mesons`.
+- `sigma_gen_mb_sum` is diagnostic. Use `sigma_gen_mb_mean` or an equivalent per-file mean for process normalization.
+- DY is reserved but not generated in this revision.
+- A final sensitivity curve still needs detector response, exposure treatment, backgrounds, and systematic uncertainties.
