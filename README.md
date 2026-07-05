@@ -62,6 +62,7 @@ Useful options:
 - `--momentum-config momentum.config`
 - `--production-config configs/charmonium.config`
 - `--print-pythia-settings`
+- `--diagnostics`
 - `--quiet` / `--batch`
 ### Production config diagnostics
 
@@ -91,6 +92,18 @@ You can test alternate charmonium steering without recompiling:
 The `n_pythia_next_failures` counter is incremented whenever `pythia.next()` returns `false`.  Pythia warning messages that do not cause a false return are not included in this counter.
 
 
+
+## Why charmonium is normalized separately
+
+`light_mesons` mode is a SoftQCD/minimum-bias-style sample intended to estimate light neutral meson production per generic proton interaction.  `charmonium` mode is not the same kind of sample: it enables hard charm/charmonium production (`HardQCD:hardccbar` and `Charmonium:all`) and therefore biases generation toward charm/charmonium events.
+
+Consequences:
+
+- `n_events_generated` in `charmonium` mode is not directly comparable to `n_events_generated` in `light_mesons` mode.
+- Do not add light-meson and charmonium yields by raw event counts.
+- Charmonium must be normalized using its generated/known cross section or an external production model.
+- The generator records `production_mode`, `sigma_gen_mb`, `sigma_err_mb`, and `weight_per_event_mb` to support later normalization, but the absolute charmonium normalization still needs validation in the target Pythia/tune setup.
+
 Intentional breaking change: the old `parentList=all` multi-emitter CLI is replaced by a single `emitterName productionMode` per job.  The executable name `allInOne_multimeson` is retained for backwards build compatibility; CMake also provides an `allInOne_emitter` alias target.
 
 ## ROOT output
@@ -102,10 +115,24 @@ Each job writes one ROOT file with two TTrees.
 Important branches include:
 
 - metadata: `run_id`, `job_id`, `thread_id`, `seed`, `mcp_mass_GeV`, `emitter_pdg`, `emitter_name`, `emitter_type`, `production_mode`, `production_mode_name`, `geometry_id`, `geometry_name`, `is_kinematically_open`
-- counters: `n_events_generated`, `n_pythia_next_failures`, `n_emitter_total`, `n_mcp_total`, `n_mcp_accepted`, `n_mcp_wrong_mother`, `n_mcp_no_mother`
-- derived: `emitter_per_event`, `acceptance_fraction`, `acceptance_uncertainty_binomial`, `stop_reason`, `stopping_mode`, `spectra_prescale`
+- counters: `n_events_generated`, `n_pythia_next_failures`, `n_emitter_record_entries`, `n_emitter_decayed_to_mcp`, `n_mcp_pairs`, `n_mcp_pairing_anomalies`, `n_emitter_total`, `n_mcp_total`, `n_mcp_accepted`, `n_mcp_wrong_mother`, `n_mcp_no_mother`
+- derived/cross-section metadata: `emitter_per_event`, `acceptance_fraction`, `acceptance_uncertainty_binomial`, `sigma_gen_mb`, `sigma_err_mb`, `weight_per_event_mb`, `stop_reason`, `stopping_mode`, `spectra_prescale`
 
-Backward-compatible aliases such as `mcp_mass`, `parent_pdg`, `parent_type`, `parent_name`, `n_parent_total`, and `parent_yield_per_event` are also written.
+Backward-compatible aliases such as `mcp_mass`, `parent_pdg`, `parent_type`, `parent_name`, `n_parent_total`, and `parent_yield_per_event` are also written.  `n_emitter_total` / `n_parent_total` now alias `n_emitter_decayed_to_mcp`, which is the more physical forced-decay count.
+
+
+
+### Event-record emitter bookkeeping
+
+Pythia event records can contain several entries with the same PDG ID for one physical object because of history/status copies.  Therefore:
+
+- `n_emitter_record_entries` counts all event-record entries with `abs(id) == emitter_pdg`; it is useful for status diagnostics but is not necessarily a physical decay count.
+- `n_emitter_decayed_to_mcp` counts unique MCP decay mothers using the event-local mother together with the thread/event identity, effectively `(thread_id, event_index, mother_index)`.
+- `n_mcp_pairs` counts unique MCP mothers with exactly two MCP daughters.
+- `n_mcp_pairing_anomalies` counts unique MCP mothers with a daughter count different from two.
+- For these forced two-body vector decays, `n_mcp_total` should usually equal `2 * n_emitter_decayed_to_mcp`; deviations print a warning and are stored in the anomaly counter.
+
+The file also contains an `emitter_status_counts` tree with `mcp_mass_GeV`, `emitter_pdg`, `production_mode`, `geometry_id`, `status_code`, and `count` to diagnose Pythia status/history copies.
 
 ### `mcp_spectra`
 
@@ -118,11 +145,28 @@ root -l -b -q -e '
 TFile f("outputs/test_jpsi_1gev.root");
 auto s = (TTree*)f.Get("mcp_summary");
 auto k = (TTree*)f.Get("mcp_spectra");
-s->Scan("mcp_mass_GeV:emitter_name:production_mode_name:is_kinematically_open:n_events_generated:n_emitter_total:n_mcp_total:n_mcp_accepted:n_mcp_wrong_mother:n_mcp_no_mother:n_pythia_next_failures:stop_reason:stopping_mode_name", "", "colsize=18", 20);
+s->Scan("mcp_mass_GeV:emitter_name:production_mode_name:is_kinematically_open:n_events_generated:n_emitter_record_entries:n_emitter_decayed_to_mcp:n_mcp_pairs:n_mcp_pairing_anomalies:n_mcp_total:n_mcp_accepted:n_pythia_next_failures:sigma_gen_mb:stop_reason:stopping_mode_name", "", "colsize=18", 20);
 std::cout << "spectra entries = " << (k ? k->GetEntries() : -1) << std::endl;
 '
 ```
 
+Unique MCP-mother diagnostic using `(event_index,mother_index)` for a single-thread job:
+
+```bash
+root -l -b -q -e '
+TFile f("outputs/test_jpsi_1gev.root");
+auto k = (TTree*)f.Get("mcp_spectra");
+std::set<std::pair<int,int>> mothers;
+int event_index = 0, mother_index = 0, mother_pdg = 0;
+k->SetBranchAddress("event_index", &event_index);
+k->SetBranchAddress("mother_index", &mother_index);
+k->SetBranchAddress("mother_pdg", &mother_pdg);
+for (Long64_t i = 0; i < k->GetEntries(); ++i) { k->GetEntry(i); if (mother_pdg == 443) mothers.insert({event_index, mother_index}); }
+std::cout << "unique J/psi MCP mothers = " << mothers.size() << std::endl;
+'
+```
+
+Run with `--diagnostics` to print retained-spectra geometry summaries, including x/y detector projection bands and min/max/mean/RMS for `theta_x_rad`, `theta_y_rad`, `x_at_detector_m`, and `y_at_detector_m`.
 
 ## NERSC-style workflow
 
@@ -151,7 +195,7 @@ sbatch --array=0-999 scripts/submit_nersc_array.slurm
 scripts/aggregate_outputs.py outputs/raw --csv outputs/aggregate_summary.csv
 ```
 
-The aggregator groups by `mcp_mass_GeV`, `emitter_pdg`, `production_mode`, and `geometry_id`, keeping light-meson and charmonium normalization separate.
+The aggregator groups by `mcp_mass_GeV`, `emitter_pdg`, `production_mode`, and `geometry_id`, keeping light-meson and charmonium normalization separate.  It preserves the record-entry/decayed-emitter/pairing counters and carries cross-section metadata to CSV/ROOT for diagnostics; do not interpret summed charmonium cross sections as an absolute normalization without validation.
 
 ## Plotting
 
@@ -181,7 +225,7 @@ Suggested smoke tests:
 
    ```bash
    ./allInOne_multimeson 1000 1 10000 1.00 2x2 jpsi charmonium outputs/test_jpsi_1gev.root \
-     --mode fixed-events --n-events 10000 --write-spectra accepted --quiet
+     --mode fixed-events --n-events 10000 --write-spectra all --spectra-prescale 1 --diagnostics --quiet
    ```
 
    Expected: `is_kinematically_open = 1`, `n_events_generated = 10000`, clearly nonzero `n_emitter_total`, `n_mcp_total = 2 * n_emitter_total` unless Pythia event-record status semantics require further documented filtering, and no `should not combine softQCD processes with hard ones` warning.
